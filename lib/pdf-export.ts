@@ -47,7 +47,7 @@ function applyTableRoundedCorners(data: any, doc: jsPDF, r: number = 3) {
   if (isTopLeft || isTopRight || isBottomLeft || isBottomRight) {
     const { x, y, width, height } = data.cell
     doc.saveGraphicsState()
-    
+
     // 1. Draw white mask to cover sharp corner
     doc.setFillColor(255, 255, 255)
     if (isTopLeft) {
@@ -104,7 +104,7 @@ function applyTableRoundedCorners(data: any, doc: jsPDF, r: number = 3) {
 function addFooter(doc: jsPDF, pageCount: number) {
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i)
-    
+
     // Thin divider line at bottom
     doc.setDrawColor(240, 240, 240)
     doc.setLineWidth(0.4)
@@ -113,14 +113,14 @@ function addFooter(doc: jsPDF, pageCount: number) {
     doc.setFontSize(8)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(150, 150, 150)
-    
+
     // Left aligned: Print time
     doc.text(
       `Dicetak: ${format(new Date(), "dd MMMM yyyy, HH:mm", { locale: id })}`,
       14,
       doc.internal.pageSize.height - 10
     )
-    
+
     // Right aligned: Page numbers
     doc.text(
       `Halaman ${i} dari ${pageCount}`,
@@ -233,29 +233,29 @@ function draw3DBarChart(
 }
 
 function drawStatsDashboard(
-  doc: jsPDF, 
-  y: number, 
+  doc: jsPDF,
+  y: number,
   stats: { label: string; value: string; color: { r: number; g: number; b: number } }[]
 ) {
   const gap = 5
   const totalWidth = 182
   const cardWidth = (totalWidth - gap * (stats.length - 1)) / stats.length
-  
+
   stats.forEach((stat, index) => {
     const x = 14 + index * (cardWidth + gap)
-    
+
     // Draw card background
     doc.setFillColor(250, 252, 250)
     doc.setDrawColor(220, 235, 222)
     doc.setLineWidth(0.4)
     doc.roundedRect(x, y, cardWidth, 24, 3, 3, 'FD')
-    
+
     // Stat Label
     doc.setFontSize(7.5)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(110, 110, 110)
     doc.text(stat.label.toUpperCase(), x + 5, y + 8)
-    
+
     // Stat Value
     doc.setFontSize(13)
     doc.setFont('helvetica', 'bold')
@@ -495,10 +495,9 @@ export function exportAllTimePDF(
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10.5)
   doc.setTextColor(80, 80, 80)
-  const summaryParagraph = 
+  const summaryParagraph =
     "Laporan ini menyajikan akumulasi data historis dari seluruh pelaksanaan kegiatan Car Free Day (CFD) dan Bazar UMKM di wilayah RW 17. Dokumen memuat ringkasan eksekutif jumlah merchant UMKM terdaftar, rincian produk, estimasi jumlah total pengunjung warga, serta analisis statistik kendaraan masuk (motor, mobil, dan sepeda) beserta grafiknya."
-  const splitText = doc.splitTextToSize(summaryParagraph, 150)
-  doc.text(splitText, 30, 125)
+  doc.text(summaryParagraph, 30, 125, { align: 'justify', maxWidth: 150 })
 
   // Metadata Card
   doc.setFillColor(255, 255, 255)
@@ -510,20 +509,30 @@ export function exportAllTimePDF(
   doc.setFontSize(10)
   doc.setTextColor(60, 60, 60)
   doc.text('INFORMASI LAPORAN', 38, 172)
-  
+
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
-  doc.text(`Tanggal Cetak      : ${format(new Date(), "dd MMMM yyyy, HH:mm 'WIB'", { locale: id })}`, 38, 182)
-  doc.text(`Cakupan Data       : Semua Pelaksanaan (All-Time Data)`, 38, 189)
-  doc.text(`Sumber Data        : Database Cloud Supabase RW 17`, 38, 196)
-  doc.text(`Klasifikasi        : Dokumen Internal Warga & Pengurus`, 38, 203)
+
+  const metadata = [
+    { label: 'Tanggal Cetak', value: format(new Date(), "dd MMMM yyyy, HH:mm 'WIB'", { locale: id }) },
+    { label: 'Cakupan Data', value: 'Semua Pelaksanaan (All-Time Data)' },
+    { label: 'Sumber Data', value: 'Database Cloud Supabase RW 17' },
+    { label: 'Klasifikasi', value: 'Dokumen Internal Warga & Pengurus' }
+  ]
+
+  metadata.forEach((item, index) => {
+    const yPos = 182 + index * 7
+    doc.text(item.label, 38, yPos)
+    doc.text(':', 68, yPos)
+    doc.text(item.value, 71, yPos)
+  })
 
   // Bottom footer band on cover
   doc.setFillColor(240, 245, 240)
   doc.rect(0, 280, 210, 17, 'F')
   doc.setFontSize(8)
   doc.setTextColor(140, 140, 140)
-  doc.text('(c) CFD & Bazar UMKM RW 17 | Ruang Warga Mandiri', 105, 290, { align: 'center' })
+  doc.text('© CFD & Bazar UMKM RW 17 | Ruang Warga Mandiri', 105, 290, { align: 'center' })
 
 
   // --- PAGE 2: SUMMARY & VISITOR STATISTICS ---
@@ -531,7 +540,7 @@ export function exportAllTimePDF(
   const totalEvents = visitorData.length
   const totalVisitors = visitorData.reduce((sum, v) => sum + v.count, 0)
   const totalUMKM = umkmData.length
-  
+
   const totalMotor = parkingData.reduce((sum, p) => sum + p.motor, 0)
   const totalMobil = parkingData.reduce((sum, p) => sum + p.mobil, 0)
   const totalSepeda = parkingData.reduce((sum, p) => sum + p.sepeda, 0)
