@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useRef, useCallback, memo, useEffect } from 'react'
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'framer-motion'
 import {
   Store, User, Phone, MapPin, Package, FileText, ChevronRight, Check,
   Download, Trash2, RefreshCw, Pencil, CheckCircle2, XCircle
@@ -10,7 +10,6 @@ import { supabase } from '@/lib/supabase'
 import type { UMKMRegistration, UMKMKehadiran, KategoriUMKM } from '@/types'
 import { format } from 'date-fns'
 import { id as idLocale } from 'date-fns/locale'
-import { useEffect } from 'react'
 
 const KATEGORI_LIST: KategoriUMKM[] = [
   'Makanan & Minuman',
@@ -46,6 +45,8 @@ const EMPTY_FORM: FormData = {
   nama_usaha: '', nama_pemilik: '', nomor_hp: '', kategori: '',
   jenis_produk: '', lokasi_lapak: '', deskripsi: ''
 }
+
+const TODAY = format(new Date(), 'yyyy-MM-dd')
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
 function ProgressBar({ current, total }: { current: number; total: number }) {
@@ -104,41 +105,36 @@ interface SwipeCardProps {
   onSetHadir: (umkmId: string, hadir: boolean) => void
 }
 
-function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir }: SwipeCardProps) {
-  const [offset, setOffset] = useState(0)
-  const [dragging, setDragging] = useState(false)
-  const startX = useRef(0)
-  const cardRef = useRef<HTMLDivElement>(null)
+const SwipeCard = memo(function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir }: SwipeCardProps) {
+  const x = useMotionValue(0)
+  const [swipeState, setSwipeState] = useState<'idle' | 'left' | 'right'>('idle')
 
-  // Swipe right (positive offset) → attendance panel
-  // Swipe left (negative offset) → action panel (edit/delete)
-  const REVEAL = 125 // px to snap to
+  const REVEAL = 125 // snap width in pixels
+  const SWIPE_THRESHOLD = 60
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    startX.current = e.clientX
-    setDragging(true)
-    cardRef.current?.setPointerCapture(e.pointerId)
-  }
+  const handleDragEnd = (event: any, info: any) => {
+    const currentX = x.get()
+    const velocity = info.velocity.x
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragging) return
-    const dx = e.clientX - startX.current
-    // clamp: right max +140, left max -140
-    setOffset(Math.max(-140, Math.min(140, dx)))
-  }
+    let targetX = 0
+    let newState: 'idle' | 'left' | 'right' = 'idle'
 
-  const handlePointerUp = () => {
-    setDragging(false)
-    if (offset > SWIPE_THRESHOLD) {
-      setOffset(REVEAL)       // snap open right (attendance)
-    } else if (offset < -SWIPE_THRESHOLD) {
-      setOffset(-REVEAL)      // snap open left (edit/delete)
-    } else {
-      setOffset(0)            // snap closed
+    if (currentX > SWIPE_THRESHOLD || velocity > 300) {
+      targetX = REVEAL
+      newState = 'right'
+    } else if (currentX < -SWIPE_THRESHOLD || velocity < -300) {
+      targetX = -REVEAL
+      newState = 'left'
     }
+
+    setSwipeState(newState)
+    animate(x, targetX, { type: 'spring', stiffness: 400, damping: 40 })
   }
 
-  const close = () => setOffset(0)
+  const close = () => {
+    setSwipeState('idle')
+    animate(x, 0, { type: 'spring', stiffness: 400, damping: 40 })
+  }
 
   const attendanceStatus = kehadiran === undefined
     ? null       // not marked yet
@@ -146,20 +142,25 @@ function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir
       ? true     // hadir
       : false    // tidak hadir
 
+  // Transform opacity and scale of background action buttons dynamically during swipe
+  const leftOpacity = useTransform(x, [-120, -20, 0], [1, 1, 0])
+  const leftScale = useTransform(x, [-120, -20, 0], [1, 1, 0])
+
+  const rightOpacity = useTransform(x, [0, 20, 120], [0, 1, 1])
+  const rightScale = useTransform(x, [0, 20, 120], [0, 1, 1])
+
   return (
     <div className="relative overflow-hidden rounded-xl select-none">
-      {/* ── Left background (edit/delete) — reveals when swiped LEFT ── */}
+      {/* ── Left background (edit/delete) — reveals when swiped LEFT (x is negative) ── */}
       <div
         className="absolute inset-0 flex items-center justify-end pr-4 gap-2 rounded-xl bg-transparent"
         style={{
-          pointerEvents: offset < -SWIPE_THRESHOLD ? 'auto' : 'none',
+          pointerEvents: swipeState === 'left' ? 'auto' : 'none',
         }}
       >
         <motion.button
           onClick={() => { close(); onEdit(umkm) }}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={offset < -20 ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.05 }}
+          style={{ opacity: leftOpacity, scale: leftScale }}
           className="flex flex-col items-center justify-center w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-lg"
         >
           <Pencil size={16} />
@@ -167,9 +168,7 @@ function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir
         </motion.button>
         <motion.button
           onClick={() => { close(); onDelete(umkm.id) }}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={offset < -20 ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.12 }}
+          style={{ opacity: leftOpacity, scale: leftScale }}
           className="flex flex-col items-center justify-center w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white transition-colors shadow-lg"
         >
           <Trash2 size={16} />
@@ -177,18 +176,16 @@ function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir
         </motion.button>
       </div>
 
-      {/* ── Right background (attendance) — reveals when swiped RIGHT ── */}
+      {/* ── Right background (attendance) — reveals when swiped RIGHT (x is positive) ── */}
       <div
         className="absolute inset-0 flex items-center justify-start pl-4 gap-2 rounded-xl bg-transparent"
         style={{
-          pointerEvents: offset > SWIPE_THRESHOLD ? 'auto' : 'none',
+          pointerEvents: swipeState === 'right' ? 'auto' : 'none',
         }}
       >
         <motion.button
           onClick={() => { close(); onSetHadir(umkm.id, true) }}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={offset > 20 ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.05 }}
+          style={{ opacity: rightOpacity, scale: rightScale }}
           className="flex flex-col items-center justify-center w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-lg"
         >
           <CheckCircle2 size={16} />
@@ -196,9 +193,7 @@ function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir
         </motion.button>
         <motion.button
           onClick={() => { close(); onSetHadir(umkm.id, false) }}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={offset > 20 ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.12 }}
+          style={{ opacity: rightOpacity, scale: rightScale }}
           className="flex flex-col items-center justify-center w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white transition-colors shadow-lg"
         >
           <XCircle size={16} />
@@ -208,15 +203,12 @@ function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir
 
       {/* ── Draggable card face ── */}
       <motion.div
-        ref={cardRef}
-        animate={{ x: offset }}
-        transition={dragging ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 40 }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        className="relative z-10 flex items-center gap-3 px-3 py-3 bg-[#0a1a0f]/90 border border-white/8 rounded-xl cursor-grab active:cursor-grabbing touch-pan-y"
-        style={{ touchAction: 'pan-y' }}
+        style={{ x, touchAction: 'pan-y' }}
+        drag="x"
+        dragConstraints={{ left: -140, right: 140 }}
+        dragElastic={0.15}
+        onDragEnd={handleDragEnd}
+        className="relative z-10 flex items-center gap-3 px-3 py-3 bg-[#0a1a0f]/90 border border-white/8 rounded-xl cursor-grab active:cursor-grabbing"
       >
         {/* Number + Status badge */}
         <div className="flex flex-col items-center gap-1 flex-shrink-0 w-8">
@@ -266,7 +258,7 @@ function SwipeCard({ umkm, index, today, kehadiran, onEdit, onDelete, onSetHadir
       </motion.div>
     </div>
   )
-}
+})
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function UMKMPage() {
@@ -281,13 +273,7 @@ export default function UMKMPage() {
   const [exportLoading, setExportLoading] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  const today = format(new Date(), 'yyyy-MM-dd')
-
-  useEffect(() => {
-    fetchAll()
-  }, [])
-
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     setLoadingList(true)
     const [umkmRes, kehadiranRes] = await Promise.all([
       supabase
@@ -297,7 +283,7 @@ export default function UMKMPage() {
       supabase
         .from('umkm_kehadiran')
         .select('*')
-        .eq('event_date', today),
+        .eq('event_date', TODAY),
     ])
     setRegistrations(umkmRes.data || [])
     // Build map: umkm_id → kehadiran record
@@ -307,9 +293,13 @@ export default function UMKMPage() {
     }
     setKehadiranMap(map)
     setLoadingList(false)
-  }
+  }, [])
 
-  async function handleSubmit() {
+  useEffect(() => {
+    fetchAll()
+  }, [fetchAll])
+
+  const handleSubmit = useCallback(async () => {
     setSubmitting(true)
     try {
       if (editingId) {
@@ -320,7 +310,7 @@ export default function UMKMPage() {
       } else {
         await supabase.from('umkm_registrations').insert({
           ...form,
-          event_date: today,
+          event_date: TODAY,
         })
       }
       setSubmitted(true)
@@ -330,19 +320,19 @@ export default function UMKMPage() {
     } finally {
       setSubmitting(false)
     }
-  }
+  }, [form, editingId, fetchAll])
 
-  async function handleDelete(id: string) {
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm('Hapus data UMKM ini secara permanen?')) return
     await supabase.from('umkm_registrations').delete().eq('id', id)
     await fetchAll()
-  }
+  }, [fetchAll])
 
-  async function handleSetHadir(umkmId: string, hadir: boolean) {
+  const handleSetHadir = useCallback(async (umkmId: string, hadir: boolean) => {
     await supabase
       .from('umkm_kehadiran')
       .upsert(
-        { umkm_id: umkmId, event_date: today, hadir },
+        { umkm_id: umkmId, event_date: TODAY, hadir },
         { onConflict: 'umkm_id,event_date' }
       )
 
@@ -352,14 +342,14 @@ export default function UMKMPage() {
       [umkmId]: {
         id: prev[umkmId]?.id ?? '',
         umkm_id: umkmId,
-        event_date: today,
+        event_date: TODAY,
         hadir,
         created_at: prev[umkmId]?.created_at ?? new Date().toISOString(),
       }
     }))
-  }
+  }, [])
 
-  function handleEdit(r: UMKMRegistration) {
+  const handleEdit = useCallback((r: UMKMRegistration) => {
     setForm({
       nama_usaha: r.nama_usaha,
       nama_pemilik: r.nama_pemilik,
@@ -372,35 +362,35 @@ export default function UMKMPage() {
     setEditingId(r.id)
     setStep(1)
     setSubmitted(false)
-  }
+  }, [])
 
-  function handleCancelEdit() {
+  const handleCancelEdit = useCallback(() => {
     setEditingId(null)
     setForm(EMPTY_FORM)
     setStep(0)
-  }
+  }, [])
 
-  async function handleExport() {
+  const handleExport = useCallback(async () => {
     setExportLoading(true)
     const { exportUMKMPDF } = await import('@/lib/pdf-export')
-    exportUMKMPDF(registrations, today)
+    exportUMKMPDF(registrations, TODAY)
     setExportLoading(false)
-  }
+  }, [registrations])
 
-  function handleReset() {
+  const handleReset = useCallback(() => {
     setForm(EMPTY_FORM)
     setStep(editingId ? 0 : 1)
     setSubmitted(false)
     setEditingId(null)
-  }
+  }, [editingId])
 
   const currentStep = STEPS[step - 1]
   const fieldValue = currentStep ? form[currentStep.field as keyof FormData] : ''
 
-  function handleNext() {
-    if (step < STEPS.length) setStep(step + 1)
+  const handleNext = useCallback(() => {
+    if (step < STEPS.length) setStep(prev => prev + 1)
     else handleSubmit()
-  }
+  }, [step, handleSubmit])
 
   const isValid =
     step === 0 ||
@@ -618,7 +608,7 @@ export default function UMKMPage() {
                     key={r.id}
                     umkm={r}
                     index={i}
-                    today={today}
+                    today={TODAY}
                     kehadiran={kehadiranMap[r.id]}
                     onEdit={handleEdit}
                     onDelete={handleDelete}
